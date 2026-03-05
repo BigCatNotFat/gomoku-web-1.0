@@ -7,6 +7,7 @@ const timerText = document.getElementById('timer');
 const voiceStatusText = document.getElementById('voice-status');
 const micVisualizerCanvas = document.getElementById('mic-visualizer');
 const micLevelText = document.getElementById('mic-level-text');
+const boardWrap = document.querySelector('.board-wrap');
 const boardCanvas = document.getElementById('board');
 const restartBtn = document.getElementById('restart');
 const readyBtn = document.getElementById('ready');
@@ -21,8 +22,6 @@ const audioContainer = document.getElementById('audio-container');
 const ctx = boardCanvas.getContext('2d');
 const micVisualizerCtx = micVisualizerCanvas?.getContext('2d');
 
-const CELL = 40;
-const PADDING = 20;
 const RTC_CONFIG = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
@@ -31,6 +30,12 @@ const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
 let boardSize = 15;
 let role = 'S';
 let roomId = location.pathname.split('/').filter(Boolean)[1] || 'lobby';
+let boardMetrics = {
+  size: 600,
+  padding: 20,
+  cell: 40,
+};
+
 let state = {
   board: Array.from({ length: boardSize }, () => Array(boardSize).fill(null)),
   turn: 'B',
@@ -362,41 +367,55 @@ function renderResultModal() {
   resultModal.classList.add('show');
 }
 
+function updateBoardMetrics() {
+  const wrapWidth = boardWrap?.clientWidth || window.innerWidth || 360;
+  const target = Math.min(720, Math.max(280, Math.floor(wrapWidth - 20)));
+
+  boardMetrics.size = target;
+  boardMetrics.padding = Math.max(14, Math.round(target * 0.035));
+  boardMetrics.cell = (target - boardMetrics.padding * 2) / (boardSize - 1);
+
+  boardCanvas.width = boardMetrics.size;
+  boardCanvas.height = boardMetrics.size;
+}
+
 function render() {
-  const size = PADDING * 2 + CELL * (boardSize - 1);
-  boardCanvas.width = size;
-  boardCanvas.height = size;
+  updateBoardMetrics();
+
+  const { size, padding, cell } = boardMetrics;
 
   boardCanvas.style.cursor = canMove() ? 'crosshair' : 'default';
 
   ctx.clearRect(0, 0, size, size);
 
   for (let i = 0; i < boardSize; i += 1) {
-    const offset = PADDING + i * CELL;
+    const offset = padding + i * cell;
 
     ctx.beginPath();
-    ctx.moveTo(PADDING, offset);
-    ctx.lineTo(size - PADDING, offset);
+    ctx.moveTo(padding, offset);
+    ctx.lineTo(size - padding, offset);
     ctx.strokeStyle = '#475569';
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.moveTo(offset, PADDING);
-    ctx.lineTo(offset, size - PADDING);
+    ctx.moveTo(offset, padding);
+    ctx.lineTo(offset, size - padding);
     ctx.strokeStyle = '#475569';
     ctx.stroke();
   }
+
+  const radius = Math.max(8, Math.min(16, cell * 0.34));
 
   for (let y = 0; y < boardSize; y += 1) {
     for (let x = 0; x < boardSize; x += 1) {
       const value = state.board?.[y]?.[x];
       if (!value) continue;
 
-      const cx = PADDING + x * CELL;
-      const cy = PADDING + y * CELL;
+      const cx = padding + x * cell;
+      const cy = padding + y * cell;
 
       ctx.beginPath();
-      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.fillStyle = value === 'B' ? '#0f172a' : '#f8fafc';
       ctx.fill();
       ctx.strokeStyle = '#334155';
@@ -429,6 +448,17 @@ function renderReadyButton() {
 
   const myReady = role === 'B' ? state.ready?.B : state.ready?.W;
   readyBtn.textContent = myReady ? '取消准备' : '我已准备';
+}
+
+function resizeMicVisualizerCanvas() {
+  if (!micVisualizerCanvas) return;
+
+  const wrapWidth = micVisualizerCanvas.parentElement?.clientWidth || 320;
+  const width = Math.min(560, Math.max(220, Math.floor(wrapWidth - 2)));
+  const height = 64;
+
+  micVisualizerCanvas.width = width;
+  micVisualizerCanvas.height = height;
 }
 
 function drawMicIdle(text) {
@@ -497,14 +527,14 @@ function startMicVisualizer() {
     micVisualizerRaf = null;
   }
 
-  const width = micVisualizerCanvas.width;
-  const height = micVisualizerCanvas.height;
-
   const draw = () => {
     if (!micEnabled || !micAnalyser) {
       stopMicVisualizer('麦克风电平：已关闭');
       return;
     }
+
+    const width = micVisualizerCanvas.width;
+    const height = micVisualizerCanvas.height;
 
     micAnalyser.getByteTimeDomainData(micWaveData);
 
@@ -650,19 +680,25 @@ function cleanupVoice() {
   }
 }
 
-boardCanvas.addEventListener('click', (event) => {
+function handleBoardInput(clientX, clientY) {
   if (!canMove()) return;
 
   const rect = boardCanvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
 
-  const gridX = Math.round((x - PADDING) / CELL);
-  const gridY = Math.round((y - PADDING) / CELL);
+  const { padding, cell } = boardMetrics;
+
+  const gridX = Math.round((x - padding) / cell);
+  const gridY = Math.round((y - padding) / cell);
 
   if (gridX < 0 || gridX >= boardSize || gridY < 0 || gridY >= boardSize) return;
 
   socket.emit('place', { x: gridX, y: gridY });
+}
+
+boardCanvas.addEventListener('pointerup', (event) => {
+  handleBoardInput(event.clientX, event.clientY);
 });
 
 restartBtn.addEventListener('click', () => {
@@ -708,9 +744,17 @@ copyBtn.addEventListener('click', async () => {
 });
 
 window.addEventListener('beforeunload', cleanupVoice);
+window.addEventListener('resize', () => {
+  resizeMicVisualizerCanvas();
+  render();
+  if (micEnabled && micAnalyser) {
+    startMicVisualizer();
+  }
+});
 
 setInterval(renderTurnTimer, 1000);
 
+resizeMicVisualizerCanvas();
 renderRole();
 renderStatus();
 renderReadyStatus();
