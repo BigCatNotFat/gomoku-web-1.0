@@ -22,6 +22,11 @@ function createRoom() {
     turn: 'B',
     turnStartedAt: Date.now(),
     winner: null,
+    phase: 'waiting',
+    ready: {
+      B: false,
+      W: false,
+    },
     players: {
       B: null,
       W: null,
@@ -49,6 +54,24 @@ function assignRole(room, socketId) {
   return 'S';
 }
 
+function resetToWaiting(room) {
+  room.board = createEmptyBoard();
+  room.turn = 'B';
+  room.turnStartedAt = Date.now();
+  room.winner = null;
+  room.phase = 'waiting';
+  room.ready.B = false;
+  room.ready.W = false;
+}
+
+function startMatch(room) {
+  room.board = createEmptyBoard();
+  room.turn = 'B';
+  room.turnStartedAt = Date.now();
+  room.winner = null;
+  room.phase = 'playing';
+}
+
 function serializeRoom(room) {
   const playerCount = Number(Boolean(room.players.B)) + Number(Boolean(room.players.W));
   const spectatorCount = Math.max(room.sockets.size - playerCount, 0);
@@ -58,6 +81,11 @@ function serializeRoom(room) {
     turn: room.turn,
     turnStartedAt: room.turnStartedAt,
     winner: room.winner,
+    phase: room.phase,
+    ready: {
+      B: room.ready.B,
+      W: room.ready.W,
+    },
     playerCount,
     spectatorCount,
     seats: {
@@ -171,12 +199,35 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('toggle-ready', () => {
+    const { role: currentRole, roomId: currentRoomId } = socket.data;
+    const currentRoom = rooms.get(currentRoomId);
+    if (!currentRoom) return;
+
+    if (currentRole !== 'B' && currentRole !== 'W') return;
+    if (currentRoom.phase !== 'waiting') return;
+
+    currentRoom.ready[currentRole] = !currentRoom.ready[currentRole];
+
+    if (
+      currentRoom.players.B &&
+      currentRoom.players.W &&
+      currentRoom.ready.B &&
+      currentRoom.ready.W
+    ) {
+      startMatch(currentRoom);
+    }
+
+    io.to(currentRoomId).emit('state', serializeRoom(currentRoom));
+  });
+
   socket.on('place', ({ x, y }) => {
     const { role: currentRole, roomId: currentRoomId } = socket.data;
     const currentRoom = rooms.get(currentRoomId);
     if (!currentRoom) return;
 
     if (currentRole !== 'B' && currentRole !== 'W') return;
+    if (currentRoom.phase !== 'playing') return;
     if (currentRoom.winner) return;
     if (currentRoom.turn !== currentRole) return;
 
@@ -203,11 +254,7 @@ io.on('connection', (socket) => {
     const currentRoom = rooms.get(currentRoomId);
     if (!currentRoom) return;
 
-    currentRoom.board = createEmptyBoard();
-    currentRoom.turn = 'B';
-    currentRoom.turnStartedAt = Date.now();
-    currentRoom.winner = null;
-
+    resetToWaiting(currentRoom);
     io.to(currentRoomId).emit('state', serializeRoom(currentRoom));
   });
 
@@ -220,10 +267,16 @@ io.on('connection', (socket) => {
 
     if (currentRole === 'B' && currentRoom.players.B === socket.id) {
       currentRoom.players.B = null;
+      currentRoom.ready.B = false;
     }
 
     if (currentRole === 'W' && currentRoom.players.W === socket.id) {
       currentRoom.players.W = null;
+      currentRoom.ready.W = false;
+    }
+
+    if (currentRoom.phase === 'playing' && (!currentRoom.players.B || !currentRoom.players.W)) {
+      resetToWaiting(currentRoom);
     }
 
     socket.to(currentRoomId).emit('participant-left', { peerId: socket.id });

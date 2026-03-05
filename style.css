@@ -24,6 +24,11 @@ p {
   margin: 6px 0;
 }
 
+.ready-status {
+  font-weight: 600;
+  color: #7c3aed;
+}
+
 .timer {
   font-weight: 700;
   color: #1d4ed8;

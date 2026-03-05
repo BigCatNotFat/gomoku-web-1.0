@@ -1,11 +1,13 @@
 const roomText = document.getElementById('room');
 const roleText = document.getElementById('role');
 const statusText = document.getElementById('status');
+const readyStatusText = document.getElementById('ready-status');
 const countText = document.getElementById('count');
 const timerText = document.getElementById('timer');
 const voiceStatusText = document.getElementById('voice-status');
 const boardCanvas = document.getElementById('board');
 const restartBtn = document.getElementById('restart');
+const readyBtn = document.getElementById('ready');
 const copyBtn = document.getElementById('copy');
 const micBtn = document.getElementById('mic');
 const resultModal = document.getElementById('result-modal');
@@ -30,6 +32,15 @@ let state = {
   turn: 'B',
   turnStartedAt: Date.now(),
   winner: null,
+  phase: 'waiting',
+  ready: {
+    B: false,
+    W: false,
+  },
+  seats: {
+    player1: false,
+    player2: false,
+  },
   playerCount: 0,
   spectatorCount: 0,
 };
@@ -52,6 +63,7 @@ socket.on('joined', (payload) => {
   boardSize = payload.boardSize;
   roomText.textContent = `房间: ${roomId}`;
   renderRole();
+  renderReadyButton();
   render();
 });
 
@@ -138,9 +150,11 @@ socket.on('state', (nextState) => {
   state = nextState;
   renderRole();
   renderStatus();
+  renderReadyStatus();
   renderCount();
   renderTurnTimer();
   renderResultModal();
+  renderReadyButton();
   render();
 });
 
@@ -263,7 +277,28 @@ function renderStatus() {
     statusText.textContent = '胜者：2号玩家（白棋）';
     return;
   }
+
+  if (state.phase !== 'playing') {
+    if (!state.seats?.player1 || !state.seats?.player2) {
+      statusText.textContent = '等待两位玩家入座…';
+      return;
+    }
+    statusText.textContent = '等待双方点击准备…';
+    return;
+  }
+
   statusText.textContent = state.turn === 'B' ? '当前回合：1号玩家（黑棋）' : '当前回合：2号玩家（白棋）';
+}
+
+function renderReadyStatus() {
+  if (state.phase === 'playing') {
+    readyStatusText.textContent = '';
+    return;
+  }
+
+  const bReady = state.ready?.B ? '已准备' : '未准备';
+  const wReady = state.ready?.W ? '已准备' : '未准备';
+  readyStatusText.textContent = `准备状态：1号玩家 ${bReady}｜2号玩家 ${wReady}`;
 }
 
 function renderCount() {
@@ -278,6 +313,11 @@ function formatElapsed(ms) {
 }
 
 function renderTurnTimer() {
+  if (state.phase !== 'playing') {
+    timerText.textContent = '对局未开始（双方准备后自动开局）';
+    return;
+  }
+
   const elapsed = Date.now() - (state.turnStartedAt || Date.now());
 
   if (state.winner) {
@@ -302,7 +342,7 @@ function renderResultModal() {
   }
 
   if (role === 'B' || role === 'W') {
-    resultHint.textContent = '点击“再来一局”可以立即重开。';
+    resultHint.textContent = '点击“再来一局”后双方重新准备开局。';
     replayBtn.disabled = false;
   } else {
     resultHint.textContent = '等待玩家点击“再来一局”。';
@@ -316,6 +356,8 @@ function render() {
   const size = PADDING * 2 + CELL * (boardSize - 1);
   boardCanvas.width = size;
   boardCanvas.height = size;
+
+  boardCanvas.style.cursor = canMove() ? 'crosshair' : 'default';
 
   ctx.clearRect(0, 0, size, size);
 
@@ -354,9 +396,29 @@ function render() {
 }
 
 function canMove() {
+  if (state.phase !== 'playing') return false;
   if (role !== 'B' && role !== 'W') return false;
   if (state.winner) return false;
   return role === state.turn;
+}
+
+function renderReadyButton() {
+  if (role !== 'B' && role !== 'W') {
+    readyBtn.disabled = true;
+    readyBtn.textContent = '仅玩家可准备';
+    return;
+  }
+
+  if (state.phase === 'playing') {
+    readyBtn.disabled = true;
+    readyBtn.textContent = '对局进行中';
+    return;
+  }
+
+  readyBtn.disabled = false;
+
+  const myReady = role === 'B' ? state.ready?.B : state.ready?.W;
+  readyBtn.textContent = myReady ? '取消准备' : '我已准备';
 }
 
 function renderMicButton() {
@@ -453,6 +515,12 @@ restartBtn.addEventListener('click', () => {
   }
 });
 
+readyBtn.addEventListener('click', () => {
+  if (role === 'B' || role === 'W') {
+    socket.emit('toggle-ready');
+  }
+});
+
 replayBtn.addEventListener('click', () => {
   if (role === 'B' || role === 'W') {
     socket.emit('restart');
@@ -489,8 +557,10 @@ setInterval(renderTurnTimer, 1000);
 
 renderRole();
 renderStatus();
+renderReadyStatus();
 renderCount();
 renderTurnTimer();
 renderResultModal();
+renderReadyButton();
 renderMicButton();
 render();
