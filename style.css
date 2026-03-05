@@ -39,6 +39,24 @@ p {
   color: #0f766e;
 }
 
+.mic-visualizer-wrap {
+  margin: 8px 0 10px;
+  width: fit-content;
+}
+
+#mic-visualizer {
+  display: block;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.mic-level-text {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #475569;
+}
+
 .board-wrap {
   margin-top: 16px;
   border: 1px solid #cbd5e1;

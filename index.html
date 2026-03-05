@@ -3,18 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>五子棋 1.3.0</title>
+    <title>五子棋 1.4.0</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main class="container">
-      <h1>五子棋 1.3.0</h1>
+      <h1>五子棋 1.4.0</h1>
       <p id="room"></p>
       <p id="role"></p>
       <p id="status"></p>
       <p id="ready-status" class="ready-status"></p>
       <p id="timer" class="timer"></p>
       <p id="voice-status" class="voice-status"></p>
+
+      <div class="mic-visualizer-wrap">
+        <canvas id="mic-visualizer" width="320" height="64"></canvas>
+        <p id="mic-level-text" class="mic-level-text">麦克风电平：已关闭</p>
+      </div>
+
       <p id="count"></p>
 
       <div class="board-wrap">

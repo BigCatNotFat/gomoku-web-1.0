@@ -5,6 +5,8 @@ const readyStatusText = document.getElementById('ready-status');
 const countText = document.getElementById('count');
 const timerText = document.getElementById('timer');
 const voiceStatusText = document.getElementById('voice-status');
+const micVisualizerCanvas = document.getElementById('mic-visualizer');
+const micLevelText = document.getElementById('mic-level-text');
 const boardCanvas = document.getElementById('board');
 const restartBtn = document.getElementById('restart');
 const readyBtn = document.getElementById('ready');
@@ -17,12 +19,14 @@ const replayBtn = document.getElementById('replay');
 const audioContainer = document.getElementById('audio-container');
 
 const ctx = boardCanvas.getContext('2d');
+const micVisualizerCtx = micVisualizerCanvas?.getContext('2d');
 
 const CELL = 40;
 const PADDING = 20;
 const RTC_CONFIG = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
+const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
 
 let boardSize = 15;
 let role = 'S';
@@ -49,6 +53,12 @@ let knownPeerIds = new Set();
 let localStream = null;
 let micEnabled = false;
 const peers = new Map();
+
+let micAudioContext = null;
+let micAnalyser = null;
+let micSourceNode = null;
+let micWaveData = null;
+let micVisualizerRaf = null;
 
 const isSecureAudioSupported =
   window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -421,11 +431,136 @@ function renderReadyButton() {
   readyBtn.textContent = myReady ? '取消准备' : '我已准备';
 }
 
+function drawMicIdle(text) {
+  if (!micVisualizerCtx || !micVisualizerCanvas) return;
+
+  const width = micVisualizerCanvas.width;
+  const height = micVisualizerCanvas.height;
+
+  micVisualizerCtx.clearRect(0, 0, width, height);
+  micVisualizerCtx.fillStyle = '#0b1220';
+  micVisualizerCtx.fillRect(0, 0, width, height);
+
+  micVisualizerCtx.strokeStyle = '#334155';
+  micVisualizerCtx.lineWidth = 1;
+  micVisualizerCtx.beginPath();
+  micVisualizerCtx.moveTo(0, height / 2);
+  micVisualizerCtx.lineTo(width, height / 2);
+  micVisualizerCtx.stroke();
+
+  if (micLevelText) {
+    micLevelText.textContent = text;
+  }
+}
+
+function stopMicVisualizer(text = '麦克风电平：已关闭') {
+  if (micVisualizerRaf) {
+    cancelAnimationFrame(micVisualizerRaf);
+    micVisualizerRaf = null;
+  }
+  drawMicIdle(text);
+}
+
+async function ensureMicVisualizerReady(stream) {
+  if (!AudioContextCtor || !micVisualizerCtx || !stream) return false;
+
+  if (!micAudioContext) {
+    micAudioContext = new AudioContextCtor();
+  }
+
+  if (micAudioContext.state === 'suspended') {
+    await micAudioContext.resume();
+  }
+
+  if (micSourceNode) {
+    micSourceNode.disconnect();
+    micSourceNode = null;
+  }
+
+  micAnalyser = micAudioContext.createAnalyser();
+  micAnalyser.fftSize = 1024;
+  micAnalyser.smoothingTimeConstant = 0.85;
+
+  micWaveData = new Uint8Array(micAnalyser.fftSize);
+
+  micSourceNode = micAudioContext.createMediaStreamSource(stream);
+  micSourceNode.connect(micAnalyser);
+
+  return true;
+}
+
+function startMicVisualizer() {
+  if (!micVisualizerCtx || !micVisualizerCanvas || !micAnalyser || !micWaveData) return;
+
+  if (micVisualizerRaf) {
+    cancelAnimationFrame(micVisualizerRaf);
+    micVisualizerRaf = null;
+  }
+
+  const width = micVisualizerCanvas.width;
+  const height = micVisualizerCanvas.height;
+
+  const draw = () => {
+    if (!micEnabled || !micAnalyser) {
+      stopMicVisualizer('麦克风电平：已关闭');
+      return;
+    }
+
+    micAnalyser.getByteTimeDomainData(micWaveData);
+
+    let sumSquares = 0;
+    for (let i = 0; i < micWaveData.length; i += 1) {
+      const normalized = (micWaveData[i] - 128) / 128;
+      sumSquares += normalized * normalized;
+    }
+
+    const rms = Math.sqrt(sumSquares / micWaveData.length);
+    const percent = Math.min(100, Math.round(rms * 260));
+
+    if (micLevelText) {
+      micLevelText.textContent =
+        percent > 5 ? `麦克风电平：${percent}%（正在收音）` : `麦克风电平：${percent}%（请说话测试）`;
+    }
+
+    micVisualizerCtx.clearRect(0, 0, width, height);
+    micVisualizerCtx.fillStyle = '#0b1220';
+    micVisualizerCtx.fillRect(0, 0, width, height);
+
+    micVisualizerCtx.lineWidth = 2;
+    micVisualizerCtx.strokeStyle = percent > 5 ? '#22c55e' : '#38bdf8';
+    micVisualizerCtx.beginPath();
+
+    const slice = width / micWaveData.length;
+    for (let i = 0; i < micWaveData.length; i += 1) {
+      const v = micWaveData[i] / 255;
+      const y = v * height;
+      const x = i * slice;
+
+      if (i === 0) {
+        micVisualizerCtx.moveTo(x, y);
+      } else {
+        micVisualizerCtx.lineTo(x, y);
+      }
+    }
+
+    micVisualizerCtx.stroke();
+
+    const barWidth = Math.max(8, (width * percent) / 100);
+    micVisualizerCtx.fillStyle = percent > 5 ? '#22c55e' : '#334155';
+    micVisualizerCtx.fillRect(0, height - 6, barWidth, 6);
+
+    micVisualizerRaf = requestAnimationFrame(draw);
+  };
+
+  draw();
+}
+
 function renderMicButton() {
   if (!isSecureAudioSupported) {
     micBtn.disabled = true;
     micBtn.textContent = '麦克风不可用';
     voiceStatusText.textContent = '语音功能需要 HTTPS（或 localhost）环境';
+    stopMicVisualizer('麦克风电平：不可用（需 HTTPS）');
     return;
   }
 
@@ -434,6 +569,10 @@ function renderMicButton() {
   voiceStatusText.textContent = micEnabled
     ? '语音中：房间内其他人可听到你'
     : '语音关闭：点击“打开麦克风”开始讲话';
+
+  if (!micEnabled) {
+    stopMicVisualizer('麦克风电平：已关闭');
+  }
 }
 
 async function enableMic() {
@@ -458,6 +597,14 @@ async function enableMic() {
     }
 
     micEnabled = true;
+
+    const visualizerReady = await ensureMicVisualizerReady(localStream);
+    if (visualizerReady) {
+      startMicVisualizer();
+    } else {
+      stopMicVisualizer('麦克风电平：当前浏览器不支持可视化');
+    }
+
     renderMicButton();
 
     for (const peerId of knownPeerIds) {
@@ -468,6 +615,7 @@ async function enableMic() {
     voiceStatusText.textContent = '麦克风权限被拒绝或设备不可用';
     micEnabled = false;
     renderMicButton();
+    stopMicVisualizer('麦克风电平：权限被拒绝或设备不可用');
   }
 }
 
@@ -480,9 +628,17 @@ function disableMic() {
 
   micEnabled = false;
   renderMicButton();
+  stopMicVisualizer('麦克风电平：已关闭');
 }
 
 function cleanupVoice() {
+  stopMicVisualizer('麦克风电平：已关闭');
+
+  if (micSourceNode) {
+    micSourceNode.disconnect();
+    micSourceNode = null;
+  }
+
   if (localStream) {
     for (const track of localStream.getTracks()) {
       track.stop();
