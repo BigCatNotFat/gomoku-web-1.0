@@ -29,6 +29,11 @@ p {
   color: #1d4ed8;
 }
 
+.voice-status {
+  font-weight: 600;
+  color: #0f766e;
+}
+
 .board-wrap {
   margin-top: 16px;
   border: 1px solid #cbd5e1;
@@ -48,6 +53,7 @@ p {
   margin-top: 14px;
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 button {

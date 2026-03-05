@@ -13,6 +13,7 @@
       <p id="role"></p>
       <p id="status"></p>
       <p id="timer" class="timer"></p>
+      <p id="voice-status" class="voice-status"></p>
       <p id="count"></p>
 
       <div class="board-wrap">
@@ -22,6 +23,7 @@
       <div class="actions">
         <button id="restart">重新开始</button>
         <button id="copy">复制房间链接</button>
+        <button id="mic">打开麦克风</button>
       </div>
     </main>
 
@@ -32,6 +34,8 @@
         <button id="replay">再来一局</button>
       </div>
     </div>
+
+    <div id="audio-container" hidden></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/app.js"></script>

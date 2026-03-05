@@ -3,18 +3,24 @@ const roleText = document.getElementById('role');
 const statusText = document.getElementById('status');
 const countText = document.getElementById('count');
 const timerText = document.getElementById('timer');
+const voiceStatusText = document.getElementById('voice-status');
 const boardCanvas = document.getElementById('board');
 const restartBtn = document.getElementById('restart');
 const copyBtn = document.getElementById('copy');
+const micBtn = document.getElementById('mic');
 const resultModal = document.getElementById('result-modal');
 const resultTitle = document.getElementById('result-title');
 const resultHint = document.getElementById('result-hint');
 const replayBtn = document.getElementById('replay');
+const audioContainer = document.getElementById('audio-container');
 
 const ctx = boardCanvas.getContext('2d');
 
 const CELL = 40;
 const PADDING = 20;
+const RTC_CONFIG = {
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+};
 
 let boardSize = 15;
 let role = 'S';
@@ -27,6 +33,14 @@ let state = {
   playerCount: 0,
   spectatorCount: 0,
 };
+
+let knownPeerIds = new Set();
+let localStream = null;
+let micEnabled = false;
+const peers = new Map();
+
+const isSecureAudioSupported =
+  window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
 const socket = io({
   query: { roomId },
@@ -41,6 +55,85 @@ socket.on('joined', (payload) => {
   render();
 });
 
+socket.on('participants', ({ peerIds }) => {
+  knownPeerIds = new Set((peerIds || []).filter(Boolean));
+  if (micEnabled) {
+    for (const peerId of knownPeerIds) {
+      offerPeer(peerId);
+    }
+  }
+});
+
+socket.on('participant-joined', ({ peerId }) => {
+  if (!peerId) return;
+  knownPeerIds.add(peerId);
+
+  if (micEnabled) {
+    offerPeer(peerId);
+  }
+});
+
+socket.on('participant-left', ({ peerId }) => {
+  if (!peerId) return;
+  knownPeerIds.delete(peerId);
+  removePeer(peerId);
+});
+
+socket.on('rtc-offer', async ({ fromId, sdp }) => {
+  if (!fromId || !sdp) return;
+
+  const peer = ensurePeer(fromId);
+  if (!peer) return;
+
+  try {
+    if (peer.pc.signalingState !== 'stable') {
+      await peer.pc.setLocalDescription({ type: 'rollback' });
+    }
+
+    await peer.pc.setRemoteDescription(sdp);
+
+    if (localStream) {
+      addLocalTracks(peer);
+    }
+
+    const answer = await peer.pc.createAnswer();
+    await peer.pc.setLocalDescription(answer);
+
+    socket.emit('rtc-answer', {
+      targetId: fromId,
+      sdp: peer.pc.localDescription,
+    });
+  } catch (error) {
+    console.error('Handle rtc-offer failed', error);
+  }
+});
+
+socket.on('rtc-answer', async ({ fromId, sdp }) => {
+  if (!fromId || !sdp) return;
+
+  const peer = peers.get(fromId);
+  if (!peer) return;
+
+  try {
+    await peer.pc.setRemoteDescription(sdp);
+  } catch (error) {
+    console.error('Handle rtc-answer failed', error);
+  }
+});
+
+socket.on('rtc-ice-candidate', async ({ fromId, candidate }) => {
+  if (!fromId || !candidate) return;
+
+  const peer = peers.get(fromId);
+  if (!peer) return;
+
+  try {
+    await peer.pc.addIceCandidate(candidate);
+  } catch (error) {
+    console.error('Handle rtc-ice-candidate failed', error);
+  }
+});
+
 socket.on('state', (nextState) => {
   state = nextState;
   renderRole();
@@ -50,6 +143,106 @@ socket.on('state', (nextState) => {
   renderResultModal();
   render();
 });
+
+function ensurePeer(peerId) {
+  if (!peerId) return null;
+
+  if (peers.has(peerId)) {
+    return peers.get(peerId);
+  }
+
+  const pc = new RTCPeerConnection(RTC_CONFIG);
+  const audioEl = document.createElement('audio');
+  audioEl.autoplay = true;
+  audioEl.playsInline = true;
+  audioEl.dataset.peerId = peerId;
+  audioContainer.appendChild(audioEl);
+
+  const peer = { pc, audioEl };
+  peers.set(peerId, peer);
+
+  pc.onicecandidate = (event) => {
+    if (!event.candidate) return;
+    socket.emit('rtc-ice-candidate', {
+      targetId: peerId,
+      candidate: event.candidate,
+    });
+  };
+
+  pc.ontrack = (event) => {
+    const [stream] = event.streams;
+    if (stream) {
+      peer.audioEl.srcObject = stream;
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      removePeer(peerId);
+    }
+  };
+
+  if (localStream) {
+    addLocalTracks(peer);
+  }
+
+  return peer;
+}
+
+function addLocalTracks(peer) {
+  if (!localStream || !peer) return;
+
+  const senders = peer.pc.getSenders();
+
+  for (const track of localStream.getAudioTracks()) {
+    const alreadyAdded = senders.some((sender) => sender.track === track);
+    if (!alreadyAdded) {
+      peer.pc.addTrack(track, localStream);
+    }
+  }
+}
+
+function removePeer(peerId) {
+  const peer = peers.get(peerId);
+  if (!peer) return;
+
+  try {
+    peer.pc.close();
+  } catch {
+    // ignore
+  }
+
+  if (peer.audioEl?.parentNode) {
+    peer.audioEl.parentNode.removeChild(peer.audioEl);
+  }
+
+  peers.delete(peerId);
+}
+
+async function offerPeer(peerId) {
+  if (!peerId) return;
+
+  const peer = ensurePeer(peerId);
+  if (!peer) return;
+
+  if (localStream) {
+    addLocalTracks(peer);
+  }
+
+  try {
+    if (peer.pc.signalingState !== 'stable') return;
+
+    const offer = await peer.pc.createOffer();
+    await peer.pc.setLocalDescription(offer);
+
+    socket.emit('rtc-offer', {
+      targetId: peerId,
+      sdp: peer.pc.localDescription,
+    });
+  } catch (error) {
+    console.error('Offer peer failed', error);
+  }
+}
 
 function renderRole() {
   if (role === 'B') {
@@ -166,6 +359,79 @@ function canMove() {
   return role === state.turn;
 }
 
+function renderMicButton() {
+  if (!isSecureAudioSupported) {
+    micBtn.disabled = true;
+    micBtn.textContent = '麦克风不可用';
+    voiceStatusText.textContent = '语音功能需要 HTTPS（或 localhost）环境';
+    return;
+  }
+
+  micBtn.disabled = false;
+  micBtn.textContent = micEnabled ? '关闭麦克风' : '打开麦克风';
+  voiceStatusText.textContent = micEnabled
+    ? '语音中：房间内其他人可听到你'
+    : '语音关闭：点击“打开麦克风”开始讲话';
+}
+
+async function enableMic() {
+  if (!isSecureAudioSupported) {
+    renderMicButton();
+    return;
+  }
+
+  try {
+    if (!localStream) {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    }
+
+    for (const track of localStream.getAudioTracks()) {
+      track.enabled = true;
+    }
+
+    micEnabled = true;
+    renderMicButton();
+
+    for (const peerId of knownPeerIds) {
+      await offerPeer(peerId);
+    }
+  } catch (error) {
+    console.error('Enable mic failed', error);
+    voiceStatusText.textContent = '麦克风权限被拒绝或设备不可用';
+    micEnabled = false;
+    renderMicButton();
+  }
+}
+
+function disableMic() {
+  if (localStream) {
+    for (const track of localStream.getAudioTracks()) {
+      track.enabled = false;
+    }
+  }
+
+  micEnabled = false;
+  renderMicButton();
+}
+
+function cleanupVoice() {
+  if (localStream) {
+    for (const track of localStream.getTracks()) {
+      track.stop();
+    }
+  }
+
+  for (const peerId of peers.keys()) {
+    removePeer(peerId);
+  }
+}
+
 boardCanvas.addEventListener('click', (event) => {
   if (!canMove()) return;
 
@@ -193,6 +459,15 @@ replayBtn.addEventListener('click', () => {
   }
 });
 
+micBtn.addEventListener('click', async () => {
+  if (micEnabled) {
+    disableMic();
+    return;
+  }
+
+  await enableMic();
+});
+
 copyBtn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(location.href);
@@ -208,6 +483,8 @@ copyBtn.addEventListener('click', async () => {
   }
 });
 
+window.addEventListener('beforeunload', cleanupVoice);
+
 setInterval(renderTurnTimer, 1000);
 
 renderRole();
@@ -215,4 +492,5 @@ renderStatus();
 renderCount();
 renderTurnTimer();
 renderResultModal();
+renderMicButton();
 render();

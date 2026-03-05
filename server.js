@@ -102,6 +102,15 @@ function checkWin(board, x, y, color) {
   return false;
 }
 
+function canForwardRtc(socket, targetId) {
+  if (typeof targetId !== 'string' || !targetId) return false;
+
+  const targetSocket = io.sockets.sockets.get(targetId);
+  if (!targetSocket) return false;
+
+  return socket.data.roomId && targetSocket.data.roomId && socket.data.roomId === targetSocket.data.roomId;
+}
+
 app.use(express.static(__dirname));
 
 app.get('/', (_req, res) => {
@@ -125,13 +134,42 @@ io.on('connection', (socket) => {
   socket.data.roomId = roomId;
   socket.data.role = role;
 
+  const peerIds = Array.from(room.sockets).filter((id) => id !== socket.id);
+
   socket.emit('joined', {
     role,
     roomId,
     boardSize: BOARD_SIZE,
   });
 
+  socket.emit('participants', { peerIds });
+  socket.to(roomId).emit('participant-joined', { peerId: socket.id });
+
   io.to(roomId).emit('state', serializeRoom(room));
+
+  socket.on('rtc-offer', ({ targetId, sdp }) => {
+    if (!canForwardRtc(socket, targetId) || !sdp) return;
+    io.to(targetId).emit('rtc-offer', {
+      fromId: socket.id,
+      sdp,
+    });
+  });
+
+  socket.on('rtc-answer', ({ targetId, sdp }) => {
+    if (!canForwardRtc(socket, targetId) || !sdp) return;
+    io.to(targetId).emit('rtc-answer', {
+      fromId: socket.id,
+      sdp,
+    });
+  });
+
+  socket.on('rtc-ice-candidate', ({ targetId, candidate }) => {
+    if (!canForwardRtc(socket, targetId) || !candidate) return;
+    io.to(targetId).emit('rtc-ice-candidate', {
+      fromId: socket.id,
+      candidate,
+    });
+  });
 
   socket.on('place', ({ x, y }) => {
     const { role: currentRole, roomId: currentRoomId } = socket.data;
@@ -187,6 +225,8 @@ io.on('connection', (socket) => {
     if (currentRole === 'W' && currentRoom.players.W === socket.id) {
       currentRoom.players.W = null;
     }
+
+    socket.to(currentRoomId).emit('participant-left', { peerId: socket.id });
 
     if (currentRoom.sockets.size === 0) {
       rooms.delete(currentRoomId);
