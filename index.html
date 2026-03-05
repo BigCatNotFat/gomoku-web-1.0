@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>五子棋 1.0</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>五子棋 1.0</h1>
+      <p id="room"></p>
+      <p id="role"></p>
+      <p id="status"></p>
+      <p id="count"></p>
+
+      <div class="board-wrap">
+        <canvas id="board" width="600" height="600"></canvas>
+      </div>
+
+      <div class="actions">
+        <button id="restart">重新开始</button>
+        <button id="copy">复制房间链接</button>
+      </div>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

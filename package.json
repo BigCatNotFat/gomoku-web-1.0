@@ -1,0 +1,30 @@
+{
+  "name": "gomoku-web-1.0",
+  "version": "1.0.0",
+  "description": "Realtime multiplayer Gomoku (2 players + spectators)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "check": "node --check server.js && node --check app.js"
+  },
+  "keywords": [
+    "gomoku",
+    "websocket",
+    "socket.io",
+    "multiplayer",
+    "game"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
