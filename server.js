@@ -20,6 +20,7 @@ function createRoom() {
   return {
     board: createEmptyBoard(),
     turn: 'B',
+    turnStartedAt: Date.now(),
     winner: null,
     players: {
       B: null,
@@ -55,6 +56,7 @@ function serializeRoom(room) {
   return {
     board: room.board,
     turn: room.turn,
+    turnStartedAt: room.turnStartedAt,
     winner: room.winner,
     playerCount,
     spectatorCount,
@@ -150,6 +152,7 @@ io.on('connection', (socket) => {
       currentRoom.winner = currentRole;
     } else {
       currentRoom.turn = currentRole === 'B' ? 'W' : 'B';
+      currentRoom.turnStartedAt = Date.now();
     }
 
     io.to(currentRoomId).emit('state', serializeRoom(currentRoom));
@@ -164,6 +167,7 @@ io.on('connection', (socket) => {
 
     currentRoom.board = createEmptyBoard();
     currentRoom.turn = 'B';
+    currentRoom.turnStartedAt = Date.now();
     currentRoom.winner = null;
 
     io.to(currentRoomId).emit('state', serializeRoom(currentRoom));

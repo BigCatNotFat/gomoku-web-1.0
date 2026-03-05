@@ -2,9 +2,14 @@ const roomText = document.getElementById('room');
 const roleText = document.getElementById('role');
 const statusText = document.getElementById('status');
 const countText = document.getElementById('count');
+const timerText = document.getElementById('timer');
 const boardCanvas = document.getElementById('board');
 const restartBtn = document.getElementById('restart');
 const copyBtn = document.getElementById('copy');
+const resultModal = document.getElementById('result-modal');
+const resultTitle = document.getElementById('result-title');
+const resultHint = document.getElementById('result-hint');
+const replayBtn = document.getElementById('replay');
 
 const ctx = boardCanvas.getContext('2d');
 
@@ -17,6 +22,7 @@ let roomId = location.pathname.split('/').filter(Boolean)[1] || 'lobby';
 let state = {
   board: Array.from({ length: boardSize }, () => Array(boardSize).fill(null)),
   turn: 'B',
+  turnStartedAt: Date.now(),
   winner: null,
   playerCount: 0,
   spectatorCount: 0,
@@ -40,6 +46,8 @@ socket.on('state', (nextState) => {
   renderRole();
   renderStatus();
   renderCount();
+  renderTurnTimer();
+  renderResultModal();
   render();
 });
 
@@ -67,6 +75,48 @@ function renderStatus() {
 
 function renderCount() {
   countText.textContent = `玩家人数：${state.playerCount}，观战人数：${state.spectatorCount}`;
+}
+
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const min = String(Math.floor(total / 60)).padStart(2, '0');
+  const sec = String(total % 60).padStart(2, '0');
+  return `${min}:${sec}`;
+}
+
+function renderTurnTimer() {
+  const elapsed = Date.now() - (state.turnStartedAt || Date.now());
+
+  if (state.winner) {
+    timerText.textContent = `本回合用时：${formatElapsed(elapsed)}（对局已结束）`;
+    return;
+  }
+
+  const currentPlayer = state.turn === 'B' ? '1号玩家（黑棋）' : '2号玩家（白棋）';
+  timerText.textContent = `${currentPlayer} 计时：${formatElapsed(elapsed)}`;
+}
+
+function renderResultModal() {
+  if (!state.winner) {
+    resultModal.classList.remove('show');
+    return;
+  }
+
+  if (state.winner === 'B') {
+    resultTitle.textContent = '1号玩家（黑棋）胜利！';
+  } else {
+    resultTitle.textContent = '2号玩家（白棋）胜利！';
+  }
+
+  if (role === 'B' || role === 'W') {
+    resultHint.textContent = '点击“再来一局”可以立即重开。';
+    replayBtn.disabled = false;
+  } else {
+    resultHint.textContent = '等待玩家点击“再来一局”。';
+    replayBtn.disabled = true;
+  }
+
+  resultModal.classList.add('show');
 }
 
 function render() {
@@ -137,6 +187,12 @@ restartBtn.addEventListener('click', () => {
   }
 });
 
+replayBtn.addEventListener('click', () => {
+  if (role === 'B' || role === 'W') {
+    socket.emit('restart');
+  }
+});
+
 copyBtn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(location.href);
@@ -152,7 +208,11 @@ copyBtn.addEventListener('click', async () => {
   }
 });
 
+setInterval(renderTurnTimer, 1000);
+
 renderRole();
 renderStatus();
 renderCount();
+renderTurnTimer();
+renderResultModal();
 render();
