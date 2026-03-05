@@ -1,11 +1,11 @@
-# Gomoku Web 1.0
+# Gomoku Web 1.2.0
 
 一个支持“同一链接多人进入”的网页五子棋：
 - 第 1 个进入房间的人 = 1 号玩家（黑棋）
 - 第 2 个进入房间的人 = 2 号玩家（白棋）
 - 第 3 个及以后进入的人 = 观战
 
-## 1.0 功能
+## 1.2 功能
 
 - 15x15 棋盘
 - 实时同步落子（Socket.IO）
@@ -13,6 +13,17 @@
 - 玩家离线后席位释放，新加入者可补位
 - 支持玩家重开（观战者不可重开）
 - 房间化链接（`/room/<roomId>`）
+- 回合计时（当前回合实时计时）
+- 胜负结果弹层 + 再来一局 UI
+- 房间语音（麦克风按钮，基于 WebRTC）
+
+## 语音功能注意
+
+- 浏览器对麦克风有安全限制：
+  - ✅ `https://` 可用
+  - ✅ `http://localhost` 可用
+  - ❌ 公网 IP 的 `http://` 默认不可用
+- 因此生产环境务必使用 HTTPS（域名证书或隧道 HTTPS）。
 
 ## 本地运行
 
@@ -27,7 +38,8 @@ npm run dev
 ## 技术栈
 
 - Node.js + Express
-- Socket.IO
+- Socket.IO（游戏状态）
+- WebRTC（语音）
 - 原生 HTML/CSS/JS（无前端框架）
 
 ## 推荐发布流程（标准团队流程）
@@ -36,34 +48,18 @@ npm run dev
 
 - `main`：生产分支
 - `develop`：集成分支（可选）
-- `feature/v1.0-gomoku-room`：功能开发分支
+- `feature/*`：功能开发分支
 
 ### 典型步骤
 
-1. 初始化仓库并首发
-   ```bash
-   git init
-   git add .
-   git commit -m "feat: gomoku web v1.0"
-   ```
-2. 推送到 GitHub
-   ```bash
-   git remote add origin <your-repo-url>
-   git branch -M main
-   git push -u origin main
-   ```
-3. 若走 PR 流程
-   - 从 `main` 切 `feature/*`
-   - 功能完成后发 PR 到 `main`
-   - 代码评审通过后合并
-4. 打版本标签
-   ```bash
-   git tag -a v1.0.0 -m "release: v1.0.0"
-   git push origin v1.0.0
-   ```
+1. 从 `main` 拉 `feature/*`
+2. 开发 + 自测
+3. 发 PR 并完成评审
+4. 合并到 `main`
+5. 打版本标签（例如 `v1.2.0`）
 
 ## 部署建议
 
-可直接部署到 Render / Railway / Fly.io / 腾讯云轻量服务器等。
+可直接部署到 Render / Railway / Fly.io / 云服务器。
 
 部署后把访问链接分享给玩家即可：同一房间链接可多人进入，自动分配 1 号 / 2 号 / 观战身份。
